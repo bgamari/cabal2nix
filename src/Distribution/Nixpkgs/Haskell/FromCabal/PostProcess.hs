@@ -27,7 +27,7 @@ fixGtkBuilds drv = drv & dependencies . pkgconfig %~ Set.filter (not . collidesW
     collidesWithHaskellName b = view localName b `Set.member` buildDeps
 
     myName :: Identifier
-    myName = ident # n where PackageName n = packageName drv
+    myName = ident # unPackageName (packageName drv)
 
     buildDeps :: Set Identifier
     buildDeps = Set.delete myName (setOf (dependencies . haskell . folded . localName) drv)
@@ -225,8 +225,9 @@ xmonadPostInstall :: String
 xmonadPostInstall = unlines
   [ "postInstall = ''"
   , "  shopt -s globstar"
-  , "  mkdir -p $out/share/man/man1"
-  , "  mv \"$out/\"**\"/man/\"*.1 $out/share/man/man1/"
+  , "  mkdir -p $doc/share/man/man1"
+  , "  mv \"$data/\"**\"/man/\"*[0-9] $doc/share/man/man1/"
+  , "  rm \"$data/\"**\"/man/\"*"
   , "'';"
   ]
 
@@ -287,8 +288,8 @@ hfseventsOverrides
   . over (libraryDepends . haskell) (Set.union (Set.fromList (map bind ["self.base", "self.cereal", "self.mtl", "self.text", "self.bytestring"])))
 
 webkitgtk24xHook :: Derivation -> Derivation    -- https://github.com/NixOS/cabal2nix/issues/145
-webkitgtk24xHook = set (libraryDepends . pkgconfig . contains (pkg "webkitgtk24x")) True
-                 . over (libraryDepends . pkgconfig) (Set.filter (\b -> view localName b /= "webkitgtk24x"))
+webkitgtk24xHook = set (libraryDepends . pkgconfig . contains (pkg "webkitgtk24x-gtk3")) True
+                 . over (libraryDepends . pkgconfig) (Set.filter (\b -> view localName b /= "webkitgtk24x-gtk3"))
 
 opencvOverrides :: Derivation -> Derivation
 opencvOverrides = set phaseOverrides "hardeningDisable = [ \"bindnow\" ];"

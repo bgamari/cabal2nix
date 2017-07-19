@@ -8,7 +8,7 @@ module Distribution.Nixpkgs.Haskell.Derivation
   , extraFunctionArgs, libraryDepends, executableDepends, testDepends, configureFlags
   , cabalFlags, runHaddock, jailbreak, doCheck, testTarget, hyperlinkSource, enableSplitObjs
   , enableLibraryProfiling, enableExecutableProfiling, phaseOverrides, editedCabalFile, metaSection
-  , dependencies, setupDepends, benchmarkDepends
+  , dependencies, setupDepends, benchmarkDepends, hasDataDir
   )
   where
 
@@ -23,7 +23,7 @@ import Distribution.Nixpkgs.Haskell.BuildInfo
 import Distribution.Nixpkgs.Haskell.OrphanInstances ( )
 import Distribution.Nixpkgs.Meta
 import Distribution.Package
-import Distribution.PackageDescription ( FlagAssignment, FlagName(..) )
+import Distribution.PackageDescription ( FlagAssignment, unFlagName )
 import GHC.Generics ( Generic )
 import Language.Nix
 import Language.Nix.PrettyPrinting
@@ -57,6 +57,7 @@ data Derivation = MkDerivation
   , _enableSplitObjs            :: Bool
   , _phaseOverrides             :: String
   , _editedCabalFile            :: String
+  , _hasDataDir               :: Bool
   , _metaSection                :: Meta
   }
   deriving (Show, Eq, Generic)
@@ -87,6 +88,7 @@ nullDerivation = MkDerivation
   , _enableSplitObjs = error "undefined Derivation.enableSplitObjs"
   , _phaseOverrides = error "undefined Derivation.phaseOverrides"
   , _editedCabalFile = error "undefined Derivation.editedCabalFile"
+  , _hasDataDir = error "undefined Derivation.hasDataDir"
   , _metaSection = error "undefined Derivation.metaSection"
   }
 
@@ -112,6 +114,7 @@ instance Pretty Derivation where
       , listattr "configureFlags" empty (map (show . show) renderedFlags)
       , boolattr "isLibrary" (not _isLibrary || _isExecutable) _isLibrary
       , boolattr "isExecutable" (not _isLibrary || _isExecutable) _isExecutable
+      , boolattr "hasDataDir" (not _hasDataDir) _hasDataDir
       , onlyIf (_setupDepends /= mempty) $ pPrintBuildInfo "setup" _setupDepends
       , onlyIf (_libraryDepends /= mempty) $ pPrintBuildInfo "library" _libraryDepends
       , onlyIf (_executableDepends /= mempty) $ pPrintBuildInfo "executable" _executableDepends
@@ -137,7 +140,7 @@ instance Pretty Derivation where
                           , Set.fromList ["fetch" ++ derivKind _src | derivKind _src /= "" && not isHackagePackage]
                           ]
 
-      renderedFlags = [ text "-f" <> (if enable then empty else char '-') <> text f | (FlagName f, enable) <- _cabalFlags ]
+      renderedFlags = [ text "-f" <> (if enable then empty else char '-') <> text (unFlagName f) | (f, enable) <- _cabalFlags ]
                       ++ map text (toAscList _configureFlags)
       isHackagePackage = "mirror://hackage/" `isPrefixOf` derivUrl _src
       sourceAttr (DerivationSource{..})

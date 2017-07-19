@@ -10,8 +10,10 @@ import Language.Nix
 
 -- | Map Cabal names to Nix attribute names.
 toNixName :: PackageName -> Identifier
-toNixName (PackageName "") = error "toNixName: invalid empty package name"
-toNixName (PackageName n)  = fromString n
+toNixName n' | null n    = error "toNixName: invalid empty package name"
+             | otherwise = fromString n
+  where
+    n = unPackageName n'
 
 -- | Map library names specified in Cabal files to Nix package identifiers.
 --

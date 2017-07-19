@@ -75,6 +75,7 @@ fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (Packag
     & enableSplitObjs .~ True
     & enableLibraryProfiling .~ False
     & enableExecutableProfiling .~ False
+    & hasDataDir .~ not (null dataFiles)
     & subpath .~ "."
     & phaseOverrides .~ mempty
     & editedCabalFile .~ (if xrev > 0
@@ -93,7 +94,7 @@ fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (Packag
     xrev = maybe 0 read (lookup "x-revision" customFieldsPD)
 
     resolveInHackage :: Identifier -> Binding
-    resolveInHackage i | (i^.ident) `elem` [ n | (Dependency (PackageName n) _) <- missingDeps ] = bindNull i
+    resolveInHackage i | (i^.ident) `elem` [ unPackageName n | (Dependency n _) <- missingDeps ] = bindNull i
                        | otherwise = binding # (i, path # ["self",i])   -- TODO: "self" shouldn't be hardcoded.
 
     goodScopes :: Set [Identifier]
@@ -109,15 +110,15 @@ fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (Packag
       | otherwise                        = bindNull i
 
     resolveInHackageThenNixpkgs :: Identifier -> Binding
-    resolveInHackageThenNixpkgs i | haskellResolver (Dependency (PackageName (i^.ident)) anyVersion) = resolveInHackage i
+    resolveInHackageThenNixpkgs i | haskellResolver (Dependency (mkPackageName (i^.ident)) anyVersion) = resolveInHackage i
                                   | otherwise = resolveInNixpkgs i
 
     convertBuildInfo :: Cabal.BuildInfo -> Nix.BuildInfo
     convertBuildInfo Cabal.BuildInfo {..} = mempty
       & haskell .~ Set.fromList [ resolveInHackage (toNixName x) | (Dependency x _) <- targetBuildDepends ]
       & system .~ Set.fromList [ resolveInNixpkgs y | x <- extraLibs, y <- libNixName x ]
-      & pkgconfig .~ Set.fromList [ resolveInNixpkgs y | Dependency (PackageName x) _ <- pkgconfigDepends, y <- libNixName x ]
-      & tool .~ Set.fromList [ resolveInHackageThenNixpkgs y | Dependency (PackageName x) _ <- buildTools, y <- buildToolNixName x ]
+      & pkgconfig .~ Set.fromList [ resolveInNixpkgs y | Dependency x _ <- pkgconfigDepends, y <- libNixName (unPackageName x) ]
+      & tool .~ Set.fromList [ resolveInHackageThenNixpkgs y | Dependency x _ <- buildTools, y <- buildToolNixName (unPackageName x) ]
 
     convertSetupBuildInfo :: Cabal.SetupBuildInfo -> Nix.BuildInfo
     convertSetupBuildInfo bi = mempty
@@ -133,7 +134,7 @@ enableTests gd = gd { condTestSuites = flaggedTests }
     flaggedTests = map (second (mapTreeData enableTest)) (condTestSuites gd)
 
     enableTest :: TestSuite -> TestSuite
-    enableTest t = t { testEnabled = True }
+    enableTest t = t { testBuildInfo = makeBuildable (testBuildInfo t) }
 
 enableBenchmarks :: GenericPackageDescription -> GenericPackageDescription
 enableBenchmarks gd = gd { condBenchmarks = flaggedBenchmarks }
@@ -142,4 +143,7 @@ enableBenchmarks gd = gd { condBenchmarks = flaggedBenchmarks }
     flaggedBenchmarks = map (second (mapTreeData enableBenchmark)) (condBenchmarks gd)
 
     enableBenchmark :: Benchmark -> Benchmark
-    enableBenchmark t = t { benchmarkEnabled = True }
+    enableBenchmark t = t -- { benchmarkEnabled = True }
+
+makeBuildable :: Cabal.BuildInfo -> Cabal.BuildInfo
+makeBuildable bi = bi { buildable = True }

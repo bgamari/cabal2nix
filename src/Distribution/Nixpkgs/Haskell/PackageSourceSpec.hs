@@ -9,7 +9,7 @@ import Control.Monad.Trans.Maybe
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.List ( isSuffixOf, isPrefixOf )
 import Data.Maybe
-import Data.Version
+import Distribution.Version
 import Distribution.Hackage.DB.Parsed
 import Distribution.Nixpkgs.Fetch
 import Distribution.Nixpkgs.Hashes
@@ -55,14 +55,10 @@ fromDB optHackageDB pkg = do
     Nothing -> hPutStrLn stderr "*** no such package in the cabal database (did you run cabal update?). " >> exitFailure
  where
   pkgId = fromMaybe (error ("invalid Haskell package id " ++ show pkg)) (simpleParse pkg)
-  Cabal.PackageName name = Cabal.pkgName pkgId
-  version = Cabal.pkgVersion pkgId
+  name = Cabal.unPackageName (Cabal.pkgName pkgId)
 
   lookupVersion :: DB.Map DB.Version Cabal.GenericPackageDescription -> Maybe Cabal.GenericPackageDescription
-  lookupVersion
-    | null (versionBranch version) = fmap snd . listToMaybe . reverse . DB.toAscList
-    | otherwise                    = DB.lookup version
-
+  lookupVersion = fmap snd . listToMaybe . reverse . DB.toAscList
 
 readFileMay :: String -> IO (Maybe String)
 readFileMay file = do
@@ -119,7 +115,7 @@ sourceFromHackage optHash pkgId cabalDir = do
 showPackageIdentifier :: Cabal.GenericPackageDescription -> String
 showPackageIdentifier pkgDesc = name ++ "-" ++ showVersion version where
   pkgId = Cabal.package . Cabal.packageDescription $ pkgDesc
-  Cabal.PackageName name = Cabal.packageName pkgId
+  name = Cabal.unPackageName (Cabal.packageName pkgId)
   version = Cabal.packageVersion pkgId
 
 cabalFromPath :: FilePath -> MaybeT IO (Bool, Cabal.GenericPackageDescription)

@@ -15,6 +15,10 @@ import Distribution.PackageDescription
 import Distribution.PackageDescription.Parse
 import Distribution.System
 import Distribution.Text
+import Distribution.Types.LegacyExeDependency
+import Distribution.Types.PkgconfigDependency
+import Distribution.Types.UnqualComponentName
+import Distribution.Types.CondTree
 import Distribution.Verbosity
 import Distribution.Version
 import GHC.Generics ( Generic )
@@ -39,9 +43,9 @@ infixr 0 :=>
 data BInfo = BInfo
   { disabled  :: Condition Config
   , haskell   :: [IfThen Dependency]
-  , pkgconfig :: [IfThen Dependency]
+  , pkgconfig :: [IfThen PkgconfigDependency]
   , system    :: [IfThen Dependency]
-  , tools     :: [IfThen Dependency]
+  , tools     :: [IfThen LegacyExeDependency]
   }
   deriving (Show, Generic)
 
@@ -54,7 +58,7 @@ buildinfo2binfo cond bi = BInfo
   { disabled = if buildable bi then mempty else cond
   , haskell =  map (cond :=>) (targetBuildDepends bi)
   , pkgconfig = map (cond :=>) (pkgconfigDepends bi)
-  , system = [ cond :=> (Dependency (PackageName x) anyVersion) | x <- extraLibs bi ]
+  , system = [ cond :=> (Dependency (mkPackageName x) anyVersion) | x <- extraLibs bi ]
   , tools = map (cond :=>) (buildTools bi)
   }
 
@@ -144,4 +148,4 @@ ppConfVar (Flag name)      = text "flag" <> parens (ppFlagName name)
 ppConfVar (Impl c v)       = text "impl" <> parens (disp c <+> disp v)
 
 ppFlagName :: FlagName -> Doc
-ppFlagName (FlagName name) = text name
+ppFlagName = text . unFlagName

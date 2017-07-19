@@ -59,7 +59,7 @@ license-file:   LICENSE
 github:         nixos/cabal2nix
 category:       Distribution, Nix
 stability:      stable
-tested-with:    GHC > 8 && < 8.1
+tested-with:    GHC > 8.2 && < 8.3
 description: >
   Convert Cabal files into Nix build instructions. Users of Nix can install the
   latest version by running:
@@ -84,7 +84,7 @@ dependencies:
   - ansi-wl-pprint
   - base < 5
   - bytestring
-  - Cabal > 1.24
+  - Cabal > 2
   - containers
   - deepseq >= 1.4
   - directory
@@ -102,36 +102,6 @@ dependencies:
   - transformers
   - yaml
 
-library:
-  source-dirs: src
-  other-extensions:
-    - CPP
-    - DeriveGeneric
-    - FlexibleInstances
-    - MultiParamTypeClasses
-    - OverloadedStrings
-    - RecordWildCards
-    - ScopedTypeVariables
-    - StandaloneDeriving
-    - TemplateHaskell
-  exposed-modules:
-    - Cabal2nix
-    - Distribution.Nixpkgs.Fetch
-    - Distribution.Nixpkgs.Haskell
-    - Distribution.Nixpkgs.Haskell.BuildInfo
-    - Distribution.Nixpkgs.Haskell.Constraint
-    - Distribution.Nixpkgs.Haskell.Derivation
-    - Distribution.Nixpkgs.Haskell.FromCabal
-    - Distribution.Nixpkgs.Haskell.FromCabal.Configuration
-    - Distribution.Nixpkgs.Haskell.FromCabal.Flags
-    - Distribution.Nixpkgs.Haskell.FromCabal.License
-    - Distribution.Nixpkgs.Haskell.FromCabal.Name
-    - Distribution.Nixpkgs.Haskell.FromCabal.Normalize
-    - Distribution.Nixpkgs.Haskell.FromCabal.PostProcess
-    - Distribution.Nixpkgs.Haskell.Hackage
-    - Distribution.Nixpkgs.Haskell.OrphanInstances
-    - Distribution.Nixpkgs.Haskell.PackageSourceSpec
-
 executables:
   cabal2nix:
     main:               Main.hs
@@ -139,33 +109,11 @@ executables:
     other-modules:
       - Paths_cabal2nix
     dependencies:
-      - cabal2nix
       - pretty-show
     other-extensions:
       - DeriveGeneric
       - DuplicateRecordFields
       - FlexibleInstances
-  hackage2nix:
-    main:               Main.hs
-    source-dirs:        hackage2nix
-    other-modules:
-      - Paths_cabal2nix
-      - HackageGit
-    dependencies:
-      - cabal2nix
-      - monad-par
-      - monad-par-extras
-      - mtl
-      - time
-      - utf8-string
-    ghc-options:
-      - -threaded
-      - -rtsopts
-      - -with-rtsopts=-N
-    other-extensions:
-      - OverloadedStrings
-      - RecordWildCards
-      - TemplateHaskell
 
 tests:
   doctests:

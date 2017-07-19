@@ -13,13 +13,23 @@ import qualified Data.Text as T
 import Data.Yaml
 import Distribution.Compiler
 import Distribution.License
-import Distribution.ModuleName hiding ( main, fromString )
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.System
 import Distribution.Text
 import Distribution.Version
 import Language.Haskell.Extension
+#if MIN_VERSION_Cabal(2,0,0)
+import Distribution.Types.Mixin
+import Distribution.Types.ExecutableScope
+import Distribution.Types.ForeignLib
+import Distribution.Types.ForeignLibType
+import Distribution.Types.ForeignLibOption
+import Distribution.Types.IncludeRenaming
+import Distribution.Types.CondTree
+#else
+import Distribution.ModuleName hiding ( main, fromString )
+#endif
 
 #if !MIN_VERSION_Cabal(1,23,0)
 import GHC.Generics ( Generic )
@@ -33,6 +43,7 @@ instance NFData SetupBuildInfo
 #endif
 
 instance (NFData v, NFData c, NFData a) => NFData (CondTree v c a)
+instance (NFData v, NFData c, NFData a) => NFData (CondBranch v c a)
 instance NFData Arch
 instance NFData Benchmark
 instance NFData BenchmarkInterface
@@ -41,7 +52,6 @@ instance NFData BuildInfo
 instance NFData BuildType
 instance NFData CompilerFlavor
 instance NFData ConfVar
-instance NFData Dependency
 instance NFData Executable
 instance NFData Extension
 instance NFData Flag
@@ -51,7 +61,6 @@ instance NFData KnownExtension
 instance NFData Language
 instance NFData Library
 instance NFData License
-instance NFData ModuleName
 instance NFData ModuleReexport
 instance NFData ModuleRenaming
 instance NFData OS
@@ -62,15 +71,28 @@ instance NFData SourceRepo
 instance NFData TestSuite
 instance NFData TestSuiteInterface
 instance NFData TestType
-instance NFData VersionRange
 instance NFData a => NFData (Condition a)
 instance NFData Platform
 instance NFData CompilerInfo
 instance NFData CompilerId
 instance NFData AbiTag
 
+#if MIN_VERSION_Cabal(2,0,0)
+instance NFData Mixin
+instance NFData ForeignLib
+instance NFData ForeignLibType
+instance NFData ForeignLibOption
+instance NFData ExecutableScope
+instance NFData IncludeRenaming
+instance NFData LibVersionInfo
+#else
+instance NFData Dependency
+instance NFData ModuleName
+instance NFData VersionRange
+
 instance IsString PackageName where
   fromString = text2isString "PackageName"
+#endif
 
 instance IsString Version where
   fromString = text2isString "Version"

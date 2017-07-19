@@ -66,7 +66,7 @@ author:         Peter Simons,
 maintainer:     Peter Simons <simons@cryp.to>
 license:        BSD3
 license-file:   LICENSE
-tested-with:    GHC > 8 && < 8.1
+tested-with:    GHC > 8.2 && < 8.3
 build-type:     Custom
 cabal-version:  >= 1.10
 
@@ -83,54 +83,6 @@ custom-setup
     , Cabal
     , cabal-doctest >= 1 && <1.1
 
-library
-  hs-source-dirs:
-      src
-  other-extensions: CPP DeriveGeneric FlexibleInstances MultiParamTypeClasses OverloadedStrings RecordWildCards ScopedTypeVariables StandaloneDeriving TemplateHaskell
-  ghc-options: -Wall
-  build-depends:
-      aeson
-    , ansi-wl-pprint
-    , base < 5
-    , bytestring
-    , Cabal > 1.24
-    , containers
-    , deepseq >= 1.4
-    , directory
-    , distribution-nixpkgs >= 1.1
-    , filepath
-    , hackage-db
-    , hopenssl >= 2
-    , language-nix
-    , lens
-    , optparse-applicative
-    , pretty >= 1.1.2
-    , process
-    , split
-    , text
-    , transformers
-    , yaml
-  exposed-modules:
-      Cabal2nix
-      Distribution.Nixpkgs.Fetch
-      Distribution.Nixpkgs.Haskell
-      Distribution.Nixpkgs.Haskell.BuildInfo
-      Distribution.Nixpkgs.Haskell.Constraint
-      Distribution.Nixpkgs.Haskell.Derivation
-      Distribution.Nixpkgs.Haskell.FromCabal
-      Distribution.Nixpkgs.Haskell.FromCabal.Configuration
-      Distribution.Nixpkgs.Haskell.FromCabal.Flags
-      Distribution.Nixpkgs.Haskell.FromCabal.License
-      Distribution.Nixpkgs.Haskell.FromCabal.Name
-      Distribution.Nixpkgs.Haskell.FromCabal.Normalize
-      Distribution.Nixpkgs.Haskell.FromCabal.PostProcess
-      Distribution.Nixpkgs.Haskell.Hackage
-      Distribution.Nixpkgs.Haskell.OrphanInstances
-      Distribution.Nixpkgs.Haskell.PackageSourceSpec
-  other-modules:
-      Paths_cabal2nix
-  default-language: Haskell2010
-
 executable cabal2nix
   main-is: Main.hs
   hs-source-dirs:
@@ -142,7 +94,7 @@ executable cabal2nix
     , ansi-wl-pprint
     , base < 5
     , bytestring
-    , Cabal > 1.24
+    , Cabal > 2
     , containers
     , deepseq >= 1.4
     , directory
@@ -159,49 +111,9 @@ executable cabal2nix
     , text
     , transformers
     , yaml
-    , cabal2nix
     , pretty-show
   other-modules:
       Paths_cabal2nix
-  default-language: Haskell2010
-
-executable hackage2nix
-  main-is: Main.hs
-  hs-source-dirs:
-      hackage2nix
-  other-extensions: OverloadedStrings RecordWildCards TemplateHaskell
-  ghc-options: -Wall -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      aeson
-    , ansi-wl-pprint
-    , base < 5
-    , bytestring
-    , Cabal > 1.24
-    , containers
-    , deepseq >= 1.4
-    , directory
-    , distribution-nixpkgs >= 1.1
-    , filepath
-    , hackage-db
-    , hopenssl >= 2
-    , language-nix
-    , lens
-    , optparse-applicative
-    , pretty >= 1.1.2
-    , process
-    , split
-    , text
-    , transformers
-    , yaml
-    , cabal2nix
-    , monad-par
-    , monad-par-extras
-    , mtl
-    , time
-    , utf8-string
-  other-modules:
-      Paths_cabal2nix
-      HackageGit
   default-language: Haskell2010
 
 test-suite doctests
@@ -215,7 +127,7 @@ test-suite doctests
     , ansi-wl-pprint
     , base < 5
     , bytestring
-    , Cabal > 1.24
+    , Cabal > 2
     , containers
     , deepseq >= 1.4
     , directory
