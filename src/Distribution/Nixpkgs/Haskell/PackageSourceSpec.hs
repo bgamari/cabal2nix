@@ -34,6 +34,9 @@ data Package = Package
   }
   deriving (Show)
 
+instance Cabal.Package Package where
+    packageId = Cabal.packageId . pkgCabal
+
 getPackage :: Bool
            -- ^ Whether hpack should regenerate the cabal file.
            -> Maybe FilePath
