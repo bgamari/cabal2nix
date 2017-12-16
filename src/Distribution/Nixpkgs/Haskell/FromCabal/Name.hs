@@ -1,10 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Distribution.Nixpkgs.Haskell.FromCabal.Name ( toNixName, libNixName, buildToolNixName ) where
+module Distribution.Nixpkgs.Haskell.FromCabal.Name
+  ( toNixName, toVersionedNixName
+  , libNixName, buildToolNixName
+  ) where
 
+import Data.List
 import Data.Maybe
 import Data.String
 import Distribution.Package
+import Distribution.Version
 import Distribution.Text
 import Language.Nix
 
@@ -12,6 +17,11 @@ import Language.Nix
 toNixName :: PackageName -> Identifier
 toNixName "" = error "toNixName: invalid empty package name"
 toNixName n  = fromString (unPackageName n)
+
+-- | Map Cabal package identifiers to Nix attribute names. Used by new-build support.
+toVersionedNixName :: PackageIdentifier -> Identifier
+toVersionedNixName n =
+    fromString (unPackageName (packageName n) ++ "-" ++ intercalate "_" (map show $ versionNumbers $ packageVersion n))
 
 -- | Map library names specified in Cabal files to Nix package identifiers.
 --
