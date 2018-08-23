@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -23,10 +24,14 @@ import Distribution.Nixpkgs.Haskell.BuildInfo
 import Distribution.Nixpkgs.Haskell.OrphanInstances ( )
 import Distribution.Nixpkgs.Meta
 import Distribution.Package
-import Distribution.PackageDescription ( FlagAssignment, unFlagName )
+import Distribution.PackageDescription ( FlagAssignment, unFlagName, unFlagAssignment )
 import GHC.Generics ( Generic )
 import Language.Nix
 import Language.Nix.PrettyPrinting
+
+#if MIN_VERSION_base(4,11,0)
+import Prelude hiding ((<>))
+#endif
 
 -- | A represtation of Nix expressions for building Haskell packages.
 -- The data type correspond closely to the definition of
@@ -102,12 +107,12 @@ instance Package Derivation where
 instance NFData Derivation
 
 instance Pretty Derivation where
-  pPrint drv@(MkDerivation {..}) = funargs (map text ("mkDerivation" : toAscList inputs)) $$ vcat
+  pPrint drv@MkDerivation {..} = funargs (map text ("mkDerivation" : toAscList inputs)) $$ vcat
     [ text "mkDerivation" <+> lbrace
     , nest 2 $ vcat
       [ attr "pname"   $ doubleQuotes $ disp (packageName _pkgid)
       , attr "version" $ doubleQuotes $ disp (packageVersion _pkgid)
-      , sourceAttr _src
+      , pPrint _src
       , onlyIf (_subpath /= ".") $ attr "postUnpack" postUnpack
       , onlyIf (_revision > 0) $ attr "revision" $ doubleQuotes $ int _revision
       , onlyIf (not (null _editedCabalFile) && _revision > 0) $ attr "editedCabalFile" $ string _editedCabalFile
@@ -140,20 +145,8 @@ instance Pretty Derivation where
                           , Set.fromList ["fetch" ++ derivKind _src | derivKind _src /= "" && not isHackagePackage]
                           ]
 
-      renderedFlags = [ text "-f" <> (if enable then empty else char '-') <> text (unFlagName f) | (f, enable) <- _cabalFlags ]
+      renderedFlags = [ text "-f" <> (if enable then empty else char '-') <> text (unFlagName f) | (f, enable) <- unFlagAssignment _cabalFlags ]
                       ++ map text (toAscList _configureFlags)
       isHackagePackage = "mirror://hackage/" `isPrefixOf` derivUrl _src
-      sourceAttr (DerivationSource{..})
-        | isHackagePackage = attr "sha256" $ string derivHash
-        | derivKind /= "" = vcat
-           [ text "src" <+> equals <+> text ("fetch" ++ derivKind) <+> lbrace
-           , nest 2 $ vcat
-             [ attr "url" $ string derivUrl
-             , attr "sha256" $ string derivHash
-             , if derivRevision /= "" then attr "rev" (string derivRevision) else empty
-             ]
-           , rbrace <> semi
-           ]
-        | otherwise = attr "src" $ text derivUrl
 
       postUnpack = string $ "sourceRoot+=/" ++ _subpath ++ "; echo source root reset to $sourceRoot"

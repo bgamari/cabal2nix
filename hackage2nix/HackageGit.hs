@@ -1,22 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module HackageGit where
+module HackageGit
+  ( Hackage, readHackage, readPackage, readPackageMeta
+  , SHA256Hash, hashes
+  )
+  where
 
 import Control.Lens hiding ( (<.>) )
 import Control.Monad
 import Data.Aeson
-import Data.ByteString.Char8 ( ByteString )
 import qualified Data.ByteString.Char8 as BS
 import Data.Map as Map
 import Data.Set as Set
 import Data.String
-import Data.String.UTF8 ( toString, fromRep )
 import Distribution.Nixpkgs.Hashes
 import Distribution.Nixpkgs.Haskell.OrphanInstances ( )
 import Distribution.Package
 import Distribution.PackageDescription
-import Distribution.PackageDescription.Parse ( parseGenericPackageDescription, ParseResult(..) )
+import Distribution.PackageDescription.Parsec ( parseGenericPackageDescriptionMaybe )
 import Distribution.Text
 import Distribution.Version
 import OpenSSL.Digest ( digest, digestByName )
@@ -38,24 +40,19 @@ getSubDirs path = do
   let isDirectory p = doesDirectoryExist (path </> p)
   getDirectoryContents path >>= filterM isDirectory . Prelude.filter (\x -> head x /= '.')
 
-decodeUTF8 :: ByteString -> String
-decodeUTF8 = toString . fromRep
-
 type SHA256Hash = String
 
 readPackage :: FilePath -> PackageIdentifier -> IO (GenericPackageDescription, SHA256Hash)
 readPackage dirPrefix (PackageIdentifier name version) = do
   let cabalFile = dirPrefix </> unPackageName name </> display version </> unPackageName name <.> "cabal"
   buf <- BS.readFile cabalFile
-  cabal <- case parseGenericPackageDescription (decodeUTF8 buf) of
-             ParseOk _ a  -> return a
-             ParseFailed err -> fail (cabalFile ++ ": " ++ show err)
+  cabal <- case parseGenericPackageDescriptionMaybe buf of
+             Just a  -> return a
+             Nothing -> fail ("cannot parse cabal file " ++ cabalFile)
   return (cabal, printSHA256 (digest (digestByName "sha256") buf))
 
 declareLenses [d|
   data Meta = Meta { hashes :: Map String String
-                   , locations :: [String]
-                   , pkgsize :: Int
                    }
     deriving (Show)
   |]
@@ -63,8 +60,6 @@ declareLenses [d|
 instance FromJSON Meta where
   parseJSON (Object v) = Meta
                          <$> v .: "package-hashes"
-                         <*> v .: "package-locations"
-                         <*> v .: "package-size"
   parseJSON o          = fail ("invalid Cabal metadata: " ++ show o)
 
 readPackageMeta :: FilePath -> PackageIdentifier -> IO Meta

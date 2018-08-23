@@ -11,6 +11,7 @@ import Data.Maybe
 import Data.Set ( Set )
 import qualified Data.Set as Set
 import Distribution.Compiler
+import Distribution.License
 import Distribution.Nixpkgs.Haskell
 import qualified Distribution.Nixpkgs.Haskell as Nix
 import Distribution.Nixpkgs.Haskell.Constraint
@@ -18,16 +19,19 @@ import Distribution.Nixpkgs.Haskell.FromCabal.License
 import Distribution.Nixpkgs.Haskell.FromCabal.Name
 import Distribution.Nixpkgs.Haskell.FromCabal.Normalize
 import Distribution.Nixpkgs.Haskell.FromCabal.PostProcess (postProcess)
+import qualified Distribution.Nixpkgs.License as Nix
 import qualified Distribution.Nixpkgs.Meta as Nix
 import Distribution.Package
 import Distribution.PackageDescription
 import qualified Distribution.PackageDescription as Cabal
-import Distribution.Types.LegacyExeDependency as Cabal
-import Distribution.Types.PkgconfigDependency as Cabal
 import Distribution.PackageDescription.Configuration as Cabal
-import Distribution.Types.ComponentRequestedSpec as Cabal
 import Distribution.System
 import Distribution.Text ( display )
+import Distribution.Types.ComponentRequestedSpec as Cabal
+import Distribution.Types.ExeDependency as Cabal
+import Distribution.Types.LegacyExeDependency as Cabal
+import Distribution.Types.PkgconfigDependency as Cabal
+import Distribution.Types.UnqualComponentName as Cabal
 import Distribution.Version
 import Language.Nix
 
@@ -40,7 +44,7 @@ fromGenericPackageDescription haskellResolver nixpkgsResolver arch compiler flag
     where
       (descr, missingDeps) = finalizeGenericPackageDescription haskellResolver arch compiler flags constraints genDesc
 
-finalizeGenericPackageDescription :: HaskellResolver -> Platform -> CompilerInfo ->  FlagAssignment -> [Constraint] -> GenericPackageDescription -> (PackageDescription, [Dependency])
+finalizeGenericPackageDescription :: HaskellResolver -> Platform -> CompilerInfo -> FlagAssignment -> [Constraint] -> GenericPackageDescription -> (PackageDescription, [Dependency])
 finalizeGenericPackageDescription haskellResolver arch compiler flags constraints genDesc =
   let
     -- We have to call the Cabal finalizer several times with different resolver
@@ -49,36 +53,43 @@ finalizeGenericPackageDescription haskellResolver arch compiler flags constraint
     finalize resolver = finalizePD flags requestedComponents resolver arch compiler constraints genDesc
 
     requestedComponents :: ComponentRequestedSpec
-    requestedComponents = defaultComponentRequestedSpec
+    requestedComponents = ComponentRequestedSpec
                           { testsRequested      = True
                           , benchmarksRequested = True
                           }
 
-    jailbrokenResolver :: HaskellResolver
-    jailbrokenResolver (Dependency pkg _) = haskellResolver (Dependency pkg anyVersion)
+    jailbroken :: HaskellResolver -> HaskellResolver
+    jailbroken resolver (Dependency pkg _) = resolver (Dependency pkg anyVersion)
 
-  in case finalize jailbrokenResolver of
+    withInternalLibs :: HaskellResolver -> HaskellResolver
+    withInternalLibs resolver d = depPkgName d `elem` internalNames || resolver d
+
+    internalNames :: [PackageName]
+    internalNames =    [ unqualComponentNameToPackageName n | (n,_) <- condSubLibraries genDesc ]
+                    ++ [ unqualComponentNameToPackageName n | Just n <- libName <$> subLibraries (packageDescription genDesc) ]
+
+  in case finalize (jailbroken (withInternalLibs haskellResolver)) of
     Left m -> case finalize (const True) of
                 Left _      -> error ("Cabal cannot finalize " ++ display (packageId genDesc))
                 Right (d,_) -> (d,m)
     Right (d,_)  -> (d,[])
 
 fromPackageDescription :: HaskellResolver -> NixpkgsResolver -> [Dependency] -> FlagAssignment -> PackageDescription -> Derivation
-fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (PackageDescription {..}) = normalize $ postProcess $ nullDerivation
+fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags PackageDescription {..} = normalize $ postProcess $ nullDerivation
     & isLibrary .~ isJust library
     & pkgid .~ package
     & revision .~ xrev
     & isLibrary .~ isJust library
     & isExecutable .~ not (null executables)
     & extraFunctionArgs .~ mempty
-    & libraryDepends .~ maybe mempty (convertBuildInfo . libBuildInfo) library
+    & libraryDepends .~ foldMap (convertBuildInfo . libBuildInfo) (maybeToList library ++ subLibraries)
     & executableDepends .~ mconcat (map (convertBuildInfo . buildInfo) executables)
     & testDepends .~ mconcat (map (convertBuildInfo . testBuildInfo) testSuites)
     & benchmarkDepends .~ mconcat (map (convertBuildInfo . benchmarkBuildInfo) benchmarks)
     & Nix.setupDepends .~ maybe mempty convertSetupBuildInfo setupBuildInfo
     & configureFlags .~ mempty
     & cabalFlags .~ flags
-    & runHaddock .~ maybe True (not . null . exposedModules) library
+    & runHaddock .~ doHaddockPhase
     & jailbreak .~ False
     & doCheck .~ True
     & testTarget .~ mempty
@@ -95,19 +106,30 @@ fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (Packag
     & metaSection .~ ( Nix.nullMeta
                      & Nix.homepage .~ homepage
                      & Nix.description .~ synopsis
-                     & Nix.license .~ fromCabalLicense license
+                     & Nix.license .~ nixLicense
                      & Nix.platforms .~ Nix.allKnownPlatforms
-                     & Nix.hydraPlatforms .~ Nix.allKnownPlatforms
+                     & Nix.hydraPlatforms .~ (if nixLicense == Nix.Known "stdenv.lib.licenses.unfree" then Set.empty else Nix.allKnownPlatforms)
                      & Nix.maintainers .~ mempty
                      & Nix.broken .~ not (null missingDeps)
                      )
   where
     xrev = maybe 0 read (lookup "x-revision" customFieldsPD)
 
+    nixLicense :: Nix.License
+    nixLicense =  fromCabalLicense (either licenseFromSPDX id licenseRaw)
+
     resolveInHackage :: Identifier -> Binding
     resolveInHackage i | (i^.ident) `elem` [ unPackageName n | (Dependency n _) <- missingDeps ] = bindNull i
                        | otherwise = binding # (i, path # ["self",i])   -- TODO: "self" shouldn't be hardcoded.
 
+    -- TODO: This is all very confusing. Haskell packages refer to the Nixpkgs
+    -- derivation 'foo' as 'pkgs.foo', because they live in the 'haskellPackages'
+    -- name space -- not on the top level. Therefore, we built our Nixpkgs lookup
+    -- function so that top level names are returned as 'pkgs.foo'. As a result, we
+    -- end up pre-pending that path to all kinds of names all over the place. I
+    -- suppose the correct approach would be to assume that the lookup function
+    -- returns names that live in the top-level and to adapt the code in
+    -- PostProcess.hs et all to that fact.
     goodScopes :: Set [Identifier]
     goodScopes = Set.fromList (map ("pkgs":) [[], ["xorg"], ["xlibs"], ["gnome2"], ["gnome"], ["gnome3"], ["kde4"]])
 
@@ -124,12 +146,22 @@ fromPackageDescription haskellResolver nixpkgsResolver missingDeps flags (Packag
     resolveInHackageThenNixpkgs i | haskellResolver (Dependency (mkPackageName (i^.ident)) anyVersion) = resolveInHackage i
                                   | otherwise = resolveInNixpkgs i
 
+    internalLibNames :: [PackageName]
+    internalLibNames = fmap unqualComponentNameToPackageName . catMaybes $ libName <$> subLibraries
+
+    doHaddockPhase :: Bool
+    doHaddockPhase | not (null internalLibNames) = False
+                   | Just l <- library           = not (null (exposedModules l))
+                   | otherwise                   = True
+
     convertBuildInfo :: Cabal.BuildInfo -> Nix.BuildInfo
+    convertBuildInfo Cabal.BuildInfo {..} | not buildable = mempty
     convertBuildInfo Cabal.BuildInfo {..} = mempty
-      & haskell .~ Set.fromList [ resolveInHackage (toNixName x) | (Dependency x _) <- targetBuildDepends ]
+      & haskell .~ Set.fromList [ resolveInHackage (toNixName x) | (Dependency x _) <- targetBuildDepends, x `notElem` internalLibNames ]
       & system .~ Set.fromList [ resolveInNixpkgs y | x <- extraLibs, y <- libNixName x ]
       & pkgconfig .~ Set.fromList [ resolveInNixpkgs y | PkgconfigDependency x _ <- pkgconfigDepends, y <- libNixName (unPkgconfigName x) ]
-      & tool .~ Set.fromList [ resolveInHackageThenNixpkgs y | LegacyExeDependency x _ <- buildTools, y <- buildToolNixName x ]
+      & tool .~ Set.fromList (map resolveInHackageThenNixpkgs . concatMap buildToolNixName
+              $ [ unPackageName x | ExeDependency x _ _ <- buildToolDepends ] ++ [ x | LegacyExeDependency x _ <- buildTools ])
 
     convertSetupBuildInfo :: Cabal.SetupBuildInfo -> Nix.BuildInfo
     convertSetupBuildInfo bi = mempty

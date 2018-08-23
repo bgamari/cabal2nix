@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE CPP #-}
 
 module Main ( main ) where
 
@@ -14,7 +15,9 @@ import Data.List
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
 import Data.Maybe
+#if !MIN_VERSION_base(4,11,0)
 import Data.Monoid
+#endif
 import Data.Set ( Set )
 import qualified Data.Set as Set
 import Data.String
@@ -27,7 +30,7 @@ import Distribution.Nixpkgs.Haskell.FromCabal.Flags
 import Distribution.Nixpkgs.Meta
 import Distribution.Nixpkgs.PackageMap
 import Distribution.Package
-import Distribution.PackageDescription hiding ( options, buildDepends, extraLibs, buildTools )
+import Distribution.PackageDescription hiding ( options, buildDepends, extraLibs, buildTools, homepage )
 import Distribution.System
 import Distribution.Text
 import Distribution.Version
@@ -78,9 +81,7 @@ main = do
             . Map.delete "som"                  -- TODO: https://github.com/NixOS/cabal2nix/issues/164
             . Map.delete "type"                 -- TODO: https://github.com/NixOS/cabal2nix/issues/163
             . Map.delete "control-invariants"   -- TODO: depends on "assert"
-            . over (at ("hermes")) ((fmap (set (contains "1.3.4.3") False)))                  -- TODO: https://github.com/haskell/hackage-server/issues/436
-            . over (at ("gogol-admin-reports")) ((fmap (set (contains "0.2.0") False)))       -- TODO: https://github.com/commercialhaskell/all-cabal-hashes/issues/11
-            . over (at ("wai-middleware-prometheus")) ((fmap (set (contains "0.2.0") False))) -- TODO: https://github.com/commercialhaskell/all-cabal-hashes/issues/15
+            . over (at ("hermes")) ((fmap (set (contains "1.3.4.3") False)))  -- TODO: https://github.com/haskell/hackage-server/issues/436
   hackage <- fixup <$> readHackage hackageRepository
   let
       hackagePackagesFile :: FilePath
@@ -150,11 +151,12 @@ main = do
 
           drv :: Derivation
           drv = fromGenericPackageDescription haskellResolver nixpkgsResolver targetPlatform (compilerInfo config) flagAssignment [] descr
-                  & src .~ DerivationSource "url" ("mirror://hackage/" ++ display pkgId ++ ".tar.gz") "" tarballSHA256
+                  & src .~ urlDerivationSource ("mirror://hackage/" ++ display pkgId ++ ".tar.gz") tarballSHA256
                   & editedCabalFile .~ cabalSHA256
                   & metaSection.hydraPlatforms %~ (`Set.difference` Map.findWithDefault Set.empty name (dontDistributePackages config))
                   & metaSection.maintainers .~ Map.findWithDefault Set.empty name globalPackageMaintainers
                   & metaSection.hydraPlatforms %~ (if isInDefaultPackageSet then id else const Set.empty)
+                  & metaSection.homepage .~ ""
 
           overrides :: Doc
           overrides = fcat $ punctuate space [ disp b <> semi | b <- Set.toList ((view (dependencies . each) drv) `Set.union` view extraFunctionArgs drv), not (isFromHackage b) ]
@@ -191,7 +193,10 @@ enforcePreferredVersions cs pkg = Set.filter (\v -> PackageIdentifier pkg v `sat
 
 resolveConstraint :: Constraint -> Hackage -> Version
 resolveConstraint c = fromMaybe (error msg) . resolveConstraint' c
-  where msg = "constraint " ++ display c ++ " cannot be resolved in Hackage"
+  where msg = unlines [ "constraint " ++ display c ++ " cannot be resolved in Hackage"
+                      , "This could be due the package being missing in the hackage directory"
+                      , "or the file system not being case sensitive."
+                      ]
 
 resolveConstraint' :: Constraint -> Hackage -> Maybe Version
 resolveConstraint' (Dependency name vrange) hackage
