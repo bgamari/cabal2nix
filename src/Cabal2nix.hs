@@ -1,15 +1,19 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Cabal2nix
-  ( main, cabal2nix, cabal2nix', cabal2nixWithDB
+  ( main, cabal2nix, cabal2nix', cabal2nixWithDB, parseArgs
+  , Options(..)
   )
   where
 
 import Control.Exception ( bracket )
 import Control.Lens
-import Control.Monad ( when )
-import Data.Maybe ( fromMaybe, isJust )
+import Control.Monad
+import Data.List
+import Data.List.Split
+import Data.Maybe ( fromMaybe, isJust, listToMaybe )
 import Data.Monoid ( (<>) )
 import qualified Data.Set as Set
 import Data.String
@@ -19,10 +23,13 @@ import Distribution.Compiler
 import Distribution.Nixpkgs.Fetch
 import Distribution.Nixpkgs.Haskell
 import Distribution.Nixpkgs.Haskell.FromCabal
+import Distribution.Nixpkgs.Haskell.FromCabal.Flags
 import qualified Distribution.Nixpkgs.Haskell.FromCabal.PostProcess as PP (pkg)
+import qualified Distribution.Nixpkgs.Haskell.Hackage as DB
 import Distribution.Nixpkgs.Haskell.PackageSourceSpec
 import Distribution.Nixpkgs.Meta
-import Distribution.PackageDescription ( mkFlagName, FlagAssignment )
+import Distribution.PackageDescription ( mkFlagName, mkFlagAssignment, FlagAssignment )
+import Distribution.Package ( packageId )
 import Distribution.Simple.Utils ( lowercase )
 import Distribution.System
 import Distribution.Text
@@ -31,9 +38,8 @@ import Options.Applicative
 import Paths_cabal2nix ( version )
 import System.Environment ( getArgs )
 import System.IO ( hFlush, hPutStrLn, stdout, stderr )
-import qualified Text.PrettyPrint.ANSI.Leijen as P2 hiding ( (<$>), (<>) )
-import Text.PrettyPrint.HughesPJClass ( Doc, Pretty(..), text, vcat, hcat, semi )
-import qualified Distribution.Nixpkgs.Haskell.Hackage as DB
+import qualified Text.PrettyPrint.ANSI.Leijen as P2
+import Text.PrettyPrint.HughesPJClass ( Doc, Pretty(..), text, vcat, hcat, semi, render, prettyShow )
 
 data Options = Options
   { optSha256 :: Maybe String
@@ -56,9 +62,10 @@ data Options = Options
   , optSystem :: Platform
   , optSubpath :: Maybe FilePath
   , optHackageSnapshot :: Maybe UTCTime
+  , optNixpkgsIdentifier :: NixpkgsResolver
   , optUrl :: String
+  , optFetchSubmodules :: Bool
   }
-  deriving (Show)
 
 options :: Parser Options
 options = Options
@@ -79,10 +86,12 @@ options = Options
           <*> switch (long "shell" <> help "generate output suitable for nix-shell")
           <*> many (strOption $ short 'f' <> long "flag" <> help "Cabal flag (may be specified multiple times)")
           <*> option (readP parse) (long "compiler" <> help "compiler to use when evaluating the Cabal file" <> value buildCompilerId <> showDefaultWith display)
-          <*> option (readP parsePlatform) (long "system" <> help "target system to use when evaluating the Cabal file" <> value buildPlatform <> showDefaultWith display)
+          <*> option (maybeReader parsePlatform) (long "system" <> help "host system (in either short Nix format or full LLVM style) to use when evaluating the Cabal file" <> value buildPlatform <> showDefaultWith display)
           <*> optional (strOption $ long "subpath" <> metavar "PATH" <> help "Path to Cabal file's directory relative to the URI (default is root directory)")
           <*> optional (option utcTimeReader (long "hackage-snapshot" <> help "hackage snapshot time, ISO format"))
+          <*> pure (\i -> Just (binding # (i, path # [ident # "pkgs", i])))
           <*> strArgument (metavar "URI")
+          <*> flag True False (long "dont-fetch-submodules" <> help "do not fetch git submodules from git sources")
 
 -- | A parser for the date. Hackage updates happen maybe once or twice a month.
 -- Example: parseTime defaultTimeLocale "%FT%T%QZ" "2017-11-20T12:18:35Z" :: Maybe UTCTime
@@ -97,11 +106,51 @@ readP p = eitherReader $ \s -> case [ r' | (r',"") <- P.readP_to_S p s ] of
                                     (r:_) -> Right r
                                     _     -> Left ("invalid value " ++ show s)
 
-parsePlatform :: P.ReadP r Platform
-parsePlatform = do arch <- P.choice [P.string "i686" >> return I386, P.string "x86_64" >> return X86_64]
-                   _ <- P.char '-'
-                   os <- P.choice [P.string "linux" >> return Linux, P.string "darwin" >> return OSX]
-                   return (Platform arch os)
+-- | Replicate the normalization performed by GHC_CONVERT_CPU in GHC's aclocal.m4
+-- since the output of that is what Cabal parses.
+ghcConvertArch :: String -> String
+ghcConvertArch arch = case arch of
+  "i486"  -> "i386"
+  "i586"  -> "i386"
+  "i686"  -> "i386"
+  "amd64" -> "x86_64"
+  _ -> fromMaybe arch $ listToMaybe
+    [prefix | prefix <- archPrefixes, prefix `isPrefixOf` arch]
+  where archPrefixes =
+          [ "aarch64", "alpha", "arm", "hppa1_1", "hppa", "m68k", "mipseb"
+          , "mipsel", "mips", "powerpc64le", "powerpc64", "powerpc", "s390x"
+          , "sparc64", "sparc"
+          ]
+
+-- | Replicate the normalization performed by GHC_CONVERT_OS in GHC's aclocal.m4
+-- since the output of that is what Cabal parses.
+ghcConvertOS :: String -> String
+ghcConvertOS os = case os of
+  "watchos"       -> "ios"
+  "tvos"          -> "ios"
+  "linux-android" -> "linux-android"
+  _ | "linux-" `isPrefixOf` os -> "linux"
+  _ -> fromMaybe os $ listToMaybe
+    [prefix | prefix <- osPrefixes, prefix `isPrefixOf` os]
+  where osPrefixes =
+          [ "gnu", "openbsd", "aix", "darwin", "solaris2", "freebsd", "nto-qnx"]
+
+parseArch :: String -> Arch
+parseArch = classifyArch Permissive . ghcConvertArch
+
+parseOS :: String -> OS
+parseOS = classifyOS Permissive . ghcConvertOS
+
+parsePlatform :: String -> Maybe Platform
+parsePlatform = parsePlatformParts . splitOn "-"
+
+parsePlatformParts :: [String] -> Maybe Platform
+parsePlatformParts = \case
+  [arch, os] ->
+    Just $ Platform (parseArch arch) (parseOS os)
+  (arch : _ : osParts) ->
+    Just $ Platform (parseArch arch) $ parseOS $ intercalate "-" osParts
+  _ -> Nothing
 
 pinfo :: ParserInfo Options
 pinfo = info
@@ -138,20 +187,18 @@ hpackOverrides :: Derivation -> Derivation
 hpackOverrides = over phaseOverrides (++ "preConfigure = \"hpack\";")
                . set (libraryDepends . tool . contains (PP.pkg "hpack")) True
 
-cabal2nix' :: [String] -> IO (Either Doc Derivation)
-cabal2nix' args = do
-  opts@Options {..} <- handleParseResult $ execParserPure defaultPrefs pinfo args
-
-  pkg <- getPackage optHpack optHackageDb optHackageSnapshot $ Source optUrl (fromMaybe "" optRevision) (maybe UnknownHash Guess optSha256) (fromMaybe "" optSubpath)
+cabal2nix' :: Options -> IO (Either Doc Derivation)
+cabal2nix' opts@Options{..} = do
+  pkg <- getPackage optHpack optFetchSubmodules optHackageDb optHackageSnapshot $
+         Source optUrl (fromMaybe "" optRevision) (maybe UnknownHash Guess optSha256) (fromMaybe "" optSubpath)
   processPackage opts pkg
 
-cabal2nixWithDB :: DB.HackageDB -> [String] -> IO (Either Doc Derivation)
-cabal2nixWithDB db args = do
-  opts@Options {..} <- handleParseResult $ execParserPure defaultPrefs pinfo args
+cabal2nixWithDB :: DB.HackageDB -> Options -> IO (Either Doc Derivation)
+cabal2nixWithDB db opts@Options{..} = do
   when (isJust optHackageDb) $ hPutStrLn stderr "WARN: HackageDB provided directly; ignoring --hackage-db"
   when (isJust optHackageSnapshot) $ hPutStrLn stderr "WARN: HackageDB provided directly; ignoring --hackage-snapshot"
-
-  pkg <- getPackage' optHpack db $ Source optUrl (fromMaybe "" optRevision) (maybe UnknownHash Guess optSha256) (fromMaybe "" optSubpath)
+  pkg <- getPackage' optHpack optFetchSubmodules (return db) $
+         Source optUrl (fromMaybe "" optRevision) (maybe UnknownHash Guess optSha256) (fromMaybe "" optSubpath)
   processPackage opts pkg
 
 processPackage :: Options -> Package -> IO (Either Doc Derivation)
@@ -159,17 +206,21 @@ processPackage Options{..} pkg = do
   let
       withHpackOverrides :: Derivation -> Derivation
       withHpackOverrides = if pkgRanHpack pkg then hpackOverrides else id
+
+      flags :: FlagAssignment
+      flags = configureCabalFlags (packageId (pkgCabal pkg)) `mappend` readFlagList optFlags
+
       deriv :: Derivation
       deriv = withHpackOverrides $ fromGenericPackageDescription (const True)
-                                            (\i -> Just (binding # (i, path # [i])))
+                                            optNixpkgsIdentifier
                                             optSystem
                                             (unknownCompilerInfo optCompiler NoAbiTag)
-                                            (readFlagList optFlags)
+                                            flags
                                             []
                                             (pkgCabal pkg)
               & src .~ pkgSource pkg
-              & subpath .~ (fromMaybe "." optSubpath)
-              & runHaddock .~ optHaddock
+              & subpath .~ fromMaybe "." optSubpath
+              & runHaddock %~ (optHaddock &&)
               & jailbreak .~ optJailbreak
               & hyperlinkSource .~ optHyperlinkSource
               & enableLibraryProfiling .~ (fromMaybe False optEnableProfiling || optEnableLibraryProfiling)
@@ -204,13 +255,14 @@ processPackage Options{..} pkg = do
   pure $ if optNixShellOutput then Left shell else Right deriv
 
 cabal2nix :: [String] -> IO ()
-cabal2nix args = do
-  v <- cabal2nix' args
-  print $ case v of
-    Left shell -> shell
-    Right d -> pPrint d
+cabal2nix = parseArgs >=> cabal2nix' >=> putStrLn . either render prettyShow
+
+parseArgs :: [String] -> IO Options
+parseArgs = handleParseResult . execParserPure defaultPrefs pinfo
+
+-- Utils
 
 readFlagList :: [String] -> FlagAssignment
-readFlagList = map tagWithValue
+readFlagList = mkFlagAssignment . map tagWithValue
   where tagWithValue ('-':fname) = (mkFlagName (lowercase fname), False)
         tagWithValue fname       = (mkFlagName (lowercase fname), True)

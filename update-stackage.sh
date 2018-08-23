@@ -15,27 +15,28 @@ sed -r \
     -e 's|^ +|  - |' \
     -e 's|,$||' \
     -e '/installed$/d' \
+    -e '/^$/d' \
     -i "$tmpfile"
 
 # Drop restrictions on some tools where we always want the latest version.
 sed -r \
-    -e '/ cabal2nix /d' \
     -e '/ cabal-install /d' \
+    -e '/ cabal2nix /d' \
     -e '/ distribution-nixpkgs /d' \
     -e '/ git-annex /d' \
     -e '/ hindent /d' \
     -e '/ hledger/d' \
+    -e '/ hlint /d' \
     -e '/ hoogle /d' \
     -e '/ hopenssl /d' \
+    -e '/ jailbreak-cabal /d' \
+    -e '/ json-autotype/d' \
+    -e '/ lambdabot-core /d' \
+    -e '/ lambdabot-irc-plugins /d' \
     -e '/ language-nix /d' \
     -e '/ ShellCheck /d' \
     -e '/ stack /d' \
-    -i "$tmpfile"
-
-# Drop packages which have broken metadata in the stupid all-cabal-hashes
-# repository. We need to drop our dependency on that thing ASAP.
-sed -r \
-    -e '/wai-middleware-prometheus ==0.2.0/d' \
+    -e '/ weeder /d' \
     -i "$tmpfile"
 
 # Drop the previous configuration ...

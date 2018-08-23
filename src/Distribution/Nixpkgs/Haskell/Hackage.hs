@@ -1,7 +1,8 @@
 module Distribution.Nixpkgs.Haskell.Hackage
   ( HackageDB, PackageData, VersionData(..)
-  , hackageTarball, readTarball
-  ) where
+  , hackageTarball, readTarball, parsePackageData
+  )
+  where
 
 import Data.Map as Map
 import qualified Distribution.Hackage.DB.Parsed as P
@@ -32,7 +33,7 @@ readTarball ts p = do
   return (mapWithKey (parsePackageData dbu) dbp)
 
 parsePackageData :: U.HackageDB -> PackageName -> P.PackageData -> PackageData
-parsePackageData dbu pn pd = mapWithKey (parseVersionData (dbu ! pn)) pd
+parsePackageData dbu pn = mapWithKey (parseVersionData (dbu ! pn))
 
 parseVersionData :: U.PackageData -> Version -> P.VersionData -> VersionData
 parseVersionData pdu v vd = VersionData

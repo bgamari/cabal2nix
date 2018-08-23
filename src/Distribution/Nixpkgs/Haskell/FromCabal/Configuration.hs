@@ -7,6 +7,7 @@
 
 module Distribution.Nixpkgs.Haskell.FromCabal.Configuration ( Configuration(..), readConfiguration, assertConsistency ) where
 
+import Control.Exception ( throwIO )
 import Control.DeepSeq
 import Control.Lens
 import Control.Monad
@@ -94,10 +95,10 @@ parseKey s = either error id (parseEither parseJSON (String s))
 
 readConfiguration :: FilePath -> IO Configuration
 readConfiguration path =
-  decodeFile path >>= maybe (fail ("invalid config file at " ++ show path)) assertConsistency
+  decodeFileEither path >>= either throwIO assertConsistency
 
 assertConsistency :: Monad m => Configuration -> m Configuration
-assertConsistency cfg@(Configuration {..}) = do
+assertConsistency cfg@Configuration {..} = do
   let report msg = fail ("*** configuration error: " ++ msg)
 
       maintainedPackages = Set.unions (Map.elems packageMaintainers)

@@ -18,7 +18,7 @@ import Distribution.Package ( PackageName, packageName, packageId, UnitId )
 import Distribution.Version
 import Distribution.Compiler
 import Distribution.System
-import Distribution.Types.GenericPackageDescription (FlagName, mkFlagName)
+import Distribution.Types.GenericPackageDescription (FlagName, mkFlagName, mkFlagAssignment)
 
 import qualified Language.Nix as Nix
 import qualified Distribution.Nixpkgs.Haskell.Hackage as DB
@@ -80,16 +80,16 @@ instance FromJSON ComponentStyle where
 
 packagesFromProject :: IO [(Package, PlanComponent)]
 packagesFromProject = do
-    hackageDB <- loadHackageDB Nothing Nothing
     eitherPlan <- Aeson.eitherDecode <$> BSL.readFile "dist-newstyle/cache/plan.json"
     CachedPlan plan <- case eitherPlan of
       Left err -> fail $ show err
       Right x -> pure x
     killDups . catMaybes <$> mapM (packageFromComponent hackageDB) plan
   where
+    hackageDB = loadHackageDB Nothing Nothing
     killDups = nubBy ((==) `on` (packageId . fst)) . sortBy (compare `on` (packageId . fst))
 
-packageFromComponent :: DB.HackageDB -> PlanComponent -> IO (Maybe (Package, PlanComponent))
+packageFromComponent :: IO DB.HackageDB -> PlanComponent -> IO (Maybe (Package, PlanComponent))
 packageFromComponent hackageDB pc
   | Just LocalComponent <- pcStyle pc = return Nothing
   | Just InplaceComponent <- pcStyle pc = return Nothing
@@ -101,7 +101,7 @@ packageFromComponent hackageDB pc
                      , sourceHash = UnknownHash
                      , sourceCabalDir = ""
                      }
-    in do pkg <- getPackage' False hackageDB src
+    in do pkg <- getPackage' False False hackageDB src
           pure $ Just (pkg, pc)
 
 derivsFromProject :: IO [D.Derivation]
@@ -117,7 +117,7 @@ packageToDeriv pkg pc =
         (\i -> Just $ Nix.binding # (i, Nix.path # [i]))
         buildPlatform
         (unknownCompilerInfo buildCompilerId NoAbiTag)
-        (maybe [] id $ pcFlags pc)
+        (mkFlagAssignment <$> maybe [] id . pcFlags $ pc)
         []
         (pkgCabal pkg)
     & D.src .~ pkgSource pkg

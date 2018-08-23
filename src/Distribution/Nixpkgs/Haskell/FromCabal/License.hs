@@ -8,7 +8,7 @@ import Distribution.Text (display)
 import Data.List (intercalate)
 import Distribution.Version
 
--- TODO: Programatically strip trailing zeros from license version numbers.
+-- TODO: Programmatically strip trailing zeros from license version numbers.
 
 fromCabalLicense :: Distribution.License.License -> Distribution.Nixpkgs.License.License
 fromCabalLicense (GPL Nothing)                             = Unknown (Just "GPL")
@@ -35,5 +35,7 @@ fromCabalLicense (Apache Nothing)                          = Known "stdenv.lib.l
 fromCabalLicense (Apache (Just (versionNumbers -> [2,0]))) = Known "stdenv.lib.licenses.asl20"
 fromCabalLicense ISC                                       = Known "stdenv.lib.licenses.isc"
 fromCabalLicense OtherLicense                              = Unknown Nothing
+fromCabalLicense (UnknownLicense "CC0-1.0")                = Known "stdenv.lib.licenses.cc0"
+fromCabalLicense (UnknownLicense "BSD3ClauseORApache20")   = Known "stdenv.lib.licenses.bsd3"
 fromCabalLicense l                                         = error $ "Distribution.Nixpkgs.Haskell.FromCabal.License.fromCabalLicense: unknown license"
                                                                   ++ show l ++"\nChoose one of: " ++ intercalate ", " (map display knownLicenses)
